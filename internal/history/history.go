@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Locate returns the path to the user's shell history file.
@@ -58,11 +60,13 @@ func LatestCommands(historyPath string, count int) ([]string, error) {
 	}
 	defer file.Close()
 
-	lines := make([]string, 0, count)
+	entries := make([]Entry, 0, count)
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+		if entry, ok := parseHistoryLine(scanner.Text(), time.Local); ok {
+			entries = append(entries, entry)
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -71,24 +75,12 @@ func LatestCommands(historyPath string, count int) ([]string, error) {
 
 	commands := make([]string, 0, count)
 
-	for i := len(lines) - 1; i >= 0 && len(commands) < count; i-- {
-		line := strings.TrimSpace(lines[i])
-		if line == "" {
+	for i := len(entries) - 1; i >= 0 && len(commands) < count; i-- {
+		entry := entries[i]
+		if entry.Command == "" {
 			continue
 		}
-
-		if strings.HasPrefix(line, ": ") {
-			if idx := strings.Index(line, ";"); idx != -1 && idx+1 < len(line) {
-				line = line[idx+1:]
-			}
-		}
-
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		commands = append(commands, line)
+		commands = append(commands, entry.Command)
 	}
 
 	// Reverse to chronological order (oldest first)
@@ -97,4 +89,86 @@ func LatestCommands(historyPath string, count int) ([]string, error) {
 	}
 
 	return commands, nil
+}
+
+// Entry represents a history line with an optional timestamp and the command text.
+type Entry struct {
+	Timestamp time.Time
+	Command   string
+}
+
+// DailyEntries returns commands executed on the provided day (local time).
+// Commands are returned in chronological order.
+func DailyEntries(historyPath string, day time.Time) ([]Entry, error) {
+	file, err := os.Open(historyPath)
+	if err != nil {
+		return nil, fmt.Errorf("open history file %s: %w", historyPath, err)
+	}
+	defer file.Close()
+
+	targetYear, targetMonth, targetDay := day.Date()
+	location := day.Location()
+
+	entries := make([]Entry, 0)
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		entry, ok := parseHistoryLine(scanner.Text(), location)
+		if !ok {
+			continue
+		}
+		if entry.Timestamp.IsZero() {
+			continue
+		}
+		year, month, day := entry.Timestamp.Date()
+		if year == targetYear && month == targetMonth && day == targetDay {
+			entries = append(entries, entry)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan history file %s: %w", historyPath, err)
+	}
+
+	return entries, nil
+}
+
+func parseHistoryLine(line string, location *time.Location) (Entry, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return Entry{}, false
+	}
+
+	if strings.HasPrefix(trimmed, ": ") {
+		rest := trimmed[2:]
+		semi := strings.Index(rest, ";")
+		if semi == -1 || semi+1 >= len(rest) {
+			return Entry{}, false
+		}
+
+		meta := rest[:semi]
+		cmd := strings.TrimSpace(rest[semi+1:])
+		if cmd == "" {
+			return Entry{}, false
+		}
+
+		entry := Entry{Command: cmd}
+
+		if colon := strings.Index(meta, ":"); colon != -1 {
+			tsStr := meta[:colon]
+			if seconds, err := strconv.ParseInt(tsStr, 10, 64); err == nil {
+				ts := time.Unix(seconds, 0)
+				if location != nil {
+					ts = ts.In(location)
+				} else {
+					ts = ts.Local()
+				}
+				entry.Timestamp = ts
+			}
+		}
+
+		return entry, true
+	}
+
+	return Entry{Command: trimmed}, true
 }
