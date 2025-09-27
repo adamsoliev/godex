@@ -69,24 +69,21 @@ func requestResponseText(ctx context.Context, client openai.Client, prompt strin
 
 func buildIntentSummaryPrompt(entries []history.Entry) string {
 	var builder strings.Builder
-	builder.WriteString("You are observing a user's shell activity. Summarize, in at most three concise bullet points, the primary intents these commands suggest. Focus on the user's goals, not step-by-step actions.\n\n")
+	builder.WriteString("You are observing a user's shell activity. Summarize, in at most three concise bullet points, the primary intents these commands suggest. Focus on the user's goals, not step-by-step actions. For each bullet, append parentheses that cite one or two representative commands, generalized to their base command (e.g., `git status` -> `git`).\n\n")
 	builder.WriteString("Today's commands (chronological):\n")
 	for _, entry := range entries {
 		timestamp := entry.Timestamp.Format("15:04:05")
 		builder.WriteString(fmt.Sprintf("- [%s] %s\n", timestamp, entry.Command))
 	}
-	builder.WriteString("\nOutput exactly 2-3 bullet points capturing the likely goals.")
+	builder.WriteString("\nOutput exactly 2-3 bullet points capturing the likely goals, each ending with the required supporting commands in parentheses.")
 	return builder.String()
 }
 
 func buildOptimizationPrompt(summary string, entries []history.Entry) string {
 	var builder strings.Builder
+	_ = entries
 	builder.WriteString("You previously summarized the user's likely goals from today's shell commands as follows:\n")
 	builder.WriteString(summary)
-	builder.WriteString("\n\nBased on those goals, propose faster or more efficient ways the user could accomplish them. Provide 3-5 specific suggestions such as defining aliases, automating tasks, installing tools, or reorganizing workflows. Each suggestion should be a short bullet with a concrete action.\n\nFor reference, here are the commands again (chronological):\n")
-	for _, entry := range entries {
-		timestamp := entry.Timestamp.Format("15:04:05")
-		builder.WriteString(fmt.Sprintf("- [%s] %s\n", timestamp, entry.Command))
-	}
+	builder.WriteString("\n\nBased on those goals, propose faster or more effective ways the user could accomplish them. Provide 3-5 practical, actionable suggestions. Each bullet should recommend a concrete improvement and may cover any relevant workflow enhancements. Avoid restating the original commands; focus on forward-looking recommendations.")
 	return builder.String()
 }
